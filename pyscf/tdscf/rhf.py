@@ -40,7 +40,7 @@ REAL_EIG_THRESHOLD = getattr(__config__, 'tdscf_rhf_TDDFT_pick_eig_threshold', 1
 MO_BASE = getattr(__config__, 'MO_BASE', 1)
 
 
-def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None, occidx=None):
     '''Generate function to compute A x
 
     Kwargs:
@@ -53,7 +53,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
     nao, nmo = mo_coeff.shape
-    occidx = numpy.where(mo_occ==2)[0]
+    if occidx is None: occidx = numpy.where(mo_occ==2)[0]
     viridx = numpy.where(mo_occ==0)[0]
     nocc = len(occidx)
     nvir = len(viridx)
@@ -105,7 +105,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     return vind, hdiag
 gen_tda_hop = gen_tda_operation
 
-def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
+def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, occidx=None):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ia||bj)
@@ -118,7 +118,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     mol = mf.mol
     nao, nmo = mo_coeff.shape
-    occidx = numpy.where(mo_occ==2)[0]
+    if occidx is None: occidx = numpy.where(mo_occ==2)[0]
     viridx = numpy.where(mo_occ==0)[0]
     orbv = mo_coeff[:,viridx]
     orbo = mo_coeff[:,occidx]
@@ -266,7 +266,12 @@ def get_nto(tdobj, state=1, threshold=OUTPUT_THRESHOLD, verbose=None):
     mol = tdobj.mol
     mo_coeff = tdobj._scf.mo_coeff
     mo_occ = tdobj._scf.mo_occ
-    orbo = mo_coeff[:,mo_occ==2]
+    mo_nocc = mo_coeff[:,mo_occ==2].shape[1]
+    occidx = tdobj.occidx
+    if occidx is None:
+        orbo = mo_coeff[:,mo_occ==2]
+    else:
+        orbo = mo_coeff[:,occidx]
     orbv = mo_coeff[:,mo_occ==0]
     nocc = orbo.shape[1]
     nvir = orbv.shape[1]
@@ -284,7 +289,10 @@ def get_nto(tdobj, state=1, threshold=OUTPUT_THRESHOLD, verbose=None):
     if mol.symmetry:
         orbsym = hf_symm.get_orbsym(mol, mo_coeff)
         orbsym_in_d2h = numpy.asarray(orbsym) % 10  # convert to D2h irreps
-        o_sym = orbsym_in_d2h[mo_occ==2]
+        if occidx is None:
+            o_sym = orbsym_in_d2h[mo_occ==2]
+        else:
+            o_sym = orbsym_in_d2h[occidx]
         v_sym = orbsym_in_d2h[mo_occ==0]
         nto_o = numpy.eye(nocc)
         nto_v = numpy.eye(nvir)
@@ -348,7 +356,7 @@ def get_nto(tdobj, state=1, threshold=OUTPUT_THRESHOLD, verbose=None):
                  ' + '.join([(fmt % (nto_o[i,0], i+MO_BASE))
                              for i in o_idx]))
         log.info('    vir-NTO: ' +
-                 ' + '.join([(fmt % (nto_v[i,0], i+MO_BASE+nocc))
+                 ' + '.join([(fmt % (nto_v[i,0], i+MO_BASE+mo_nocc))
                              for i in v_idx]))
     return weights, nto_coeff
 
@@ -358,8 +366,12 @@ def analyze(tdobj, verbose=None):
     mol = tdobj.mol
     mo_coeff = tdobj._scf.mo_coeff
     mo_occ = tdobj._scf.mo_occ
-    nocc = numpy.count_nonzero(mo_occ == 2)
-
+    occidx = tdobj.occidx
+    if occidx is None:
+        nocc = numpy.count_nonzero(mo_occ == 2)
+    else:
+        nocc = len(occidx)
+    mo_nocc = numpy.count_nonzero(mo_occ == 2)
     e_ev = numpy.asarray(tdobj.e) * nist.HARTREE2EV
     e_wn = numpy.asarray(tdobj.e) * nist.HARTREE2WAVENUMBER
     wave_length = 1e7/e_wn
@@ -371,7 +383,10 @@ def analyze(tdobj, verbose=None):
 
     if mol.symmetry:
         orbsym = hf_symm.get_orbsym(mol, mo_coeff)
-        x_sym = symm.direct_prod(orbsym[mo_occ==2], orbsym[mo_occ==0], mol.groupname)
+        if occidx is None:
+            x_sym = symm.direct_prod(orbsym[mo_occ==2], orbsym[mo_occ==0], mol.groupname)
+        else:
+            x_sym = symm.direct_prod(orbsym[occidx], orbsym[mo_occ==0], mol.groupname)
     else:
         x_sym = None
 
@@ -390,7 +405,7 @@ def analyze(tdobj, verbose=None):
             o_idx, v_idx = numpy.where(abs(x) > 0.1)
             for o, v in zip(o_idx, v_idx):
                 log.info('    %4d -> %-4d %12.5f',
-                         o+MO_BASE, v+MO_BASE+nocc, x[o,v])
+                         o+MO_BASE, v+MO_BASE+mo_nocc, x[o,v])
 
     if log.verbose >= logger.INFO:
         log.info('\n** Transition electric dipole moments (AU) **')
@@ -525,7 +540,11 @@ def _contract_multipole(tdobj, ints, hermi=True, xy=None):
     if xy is None: xy = tdobj.xy
     mo_coeff = tdobj._scf.mo_coeff
     mo_occ = tdobj._scf.mo_occ
-    orbo = mo_coeff[:,mo_occ==2]
+    occidx = tdobj.occidx
+    if isinstance(occidx, list):
+        orbo = mo_coeff[:,occidx]
+    else:
+        orbo = mo_coeff[:,mo_occ==2]
     orbv = mo_coeff[:,mo_occ==0]
 
     nstates = len(xy)
@@ -649,7 +668,7 @@ class TDMixin(lib.StreamObject):
     # Low excitation filter to avoid numerical instability
     positive_eig_threshold = getattr(__config__, 'tdscf_rhf_TDDFT_positive_eig_threshold', 1e-3)
 
-    def __init__(self, mf):
+    def __init__(self, mf, orbwin=None):
         self.verbose = mf.verbose
         self.stdout = mf.stdout
         self.mol = mf.mol
@@ -658,6 +677,7 @@ class TDMixin(lib.StreamObject):
         self.chkfile = mf.chkfile
 
         self.wfnsym = None
+        self.occidx = orbwin
 
         # xy = (X,Y), normalized to 1/2: 2(XX-YY) = 1
         # In TDA, Y = 0
@@ -666,7 +686,7 @@ class TDMixin(lib.StreamObject):
         self.xy = None
 
         keys = set(('conv_tol', 'nstates', 'singlet', 'lindep', 'level_shift',
-                    'max_space', 'max_cycle'))
+                    'max_space', 'max_cycle', 'occidx'))
         self._keys = set(self.__dict__.keys()).union(keys)
 
     @property
@@ -675,6 +695,14 @@ class TDMixin(lib.StreamObject):
     @nroots.setter
     def nroots(self, x):
         self.nstates = x
+
+    @property
+    def orbwin(self):
+        return self.occidx
+    @orbwin.setter
+    def orbwin(self, orblst):
+        occidx = [idx - 1 for idx in orblst]
+        self.occidx = occidx
 
     @property
     def e_tot(self):
@@ -767,6 +795,8 @@ class TDA(TDMixin):
             Diagonalization convergence tolerance.  Default is 1e-9.
         nstates : int
             Number of TD states to be computed. Default is 3.
+        occidx : list
+            Selected occupied molecular orbitals to be included in the excitation window
 
     Saved results:
 
@@ -780,19 +810,20 @@ class TDA(TDMixin):
             excited state.  (X,Y) are normalized to 1/2 in RHF/RKS methods and
             normalized to 1 for UHF/UKS methods. In the TDA calculation, Y = 0.
     '''
-    def gen_vind(self, mf=None):
+    def gen_vind(self, mf=None, occidx=None):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        return gen_tda_hop(mf, singlet=self.singlet, wfnsym=self.wfnsym)
+        return gen_tda_hop(mf, singlet=self.singlet, wfnsym=self.wfnsym, occidx=occidx)
 
-    def init_guess(self, mf, nstates=None, wfnsym=None):
+    def init_guess(self, mf, nstates=None, wfnsym=None, occidx=None):
         if nstates is None: nstates = self.nstates
         if wfnsym is None: wfnsym = self.wfnsym
+        if occidx is None: occidx = self.occidx
 
         mo_energy = mf.mo_energy
         mo_occ = mf.mo_occ
-        occidx = numpy.where(mo_occ==2)[0]
+        if occidx is None: occidx = numpy.where(mo_occ==2)[0]
         viridx = numpy.where(mo_occ==0)[0]
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]
         e_ia_max = e_ia.max()
@@ -818,7 +849,7 @@ class TDA(TDMixin):
             x0[i, j] = 1  # Koopmans' excitations
         return x0
 
-    def kernel(self, x0=None, nstates=None):
+    def kernel(self, x0=None, nstates=None, occidx=None):
         '''TDA diagonalization solver
         '''
         cpu0 = (logger.process_clock(), logger.perf_counter())
@@ -829,13 +860,18 @@ class TDA(TDMixin):
         else:
             self.nstates = nstates
 
+        if isinstance(occidx, list):
+            self.occidx = occidx - 1
+        else:
+            self.occidx = None
+
         log = logger.Logger(self.stdout, self.verbose)
 
         vind, hdiag = self.gen_vind(self._scf)
         precond = self.get_precond(hdiag)
 
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess(self._scf, self.nstates, self.occidx)
 
         def pickeig(w, v, nroots, envs):
             idx = numpy.where(w > self.positive_eig_threshold)[0]
@@ -849,7 +885,10 @@ class TDA(TDMixin):
                               max_space=self.max_space, pick=pickeig,
                               verbose=log)
 
-        nocc = (self._scf.mo_occ>0).sum()
+        if self.occidx is None:
+            nocc = (self._scf.mo_occ>0).sum()
+        else:
+            nocc = len(self.occidx)
         nmo = self._scf.mo_occ.size
         nvir = nmo - nocc
 # 1/sqrt(2) because self.x is for alpha excitation amplitude and 2(X^+*X) = 1
@@ -866,7 +905,7 @@ class TDA(TDMixin):
 CIS = TDA
 
 
-def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None, occidx=None):
     '''Generate function to compute
 
     [ A  B][X]
@@ -878,8 +917,10 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
     nao, nmo = mo_coeff.shape
-    occidx = numpy.where(mo_occ==2)[0]
+
+    if occidx is None: occidx = numpy.where(mo_occ==2)[0]
     viridx = numpy.where(mo_occ==0)[0]
+
     nocc = len(occidx)
     nvir = len(viridx)
     orbv = mo_coeff[:,viridx]
@@ -950,6 +991,8 @@ class TDHF(TDA):
             Diagonalization convergence tolerance.  Default is 1e-9.
         nstates : int
             Number of TD states to be computed. Default is 3.
+        occidx : list
+            Selected occupied molecular orbitals to be included in the excitation window
 
     Saved results:
 
@@ -964,17 +1007,17 @@ class TDHF(TDA):
             normalized to 1 for UHF/UKS methods. In the TDA calculation, Y = 0.
     '''
     @lib.with_doc(gen_tdhf_operation.__doc__)
-    def gen_vind(self, mf=None):
+    def gen_vind(self, mf=None, occidx=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(mf, singlet=self.singlet, wfnsym=self.wfnsym)
+        return gen_tdhf_operation(mf, singlet=self.singlet, wfnsym=self.wfnsym, occidx=occidx)
 
-    def init_guess(self, mf, nstates=None, wfnsym=None):
-        x0 = TDA.init_guess(self, mf, nstates, wfnsym)
+    def init_guess(self, mf, nstates=None, wfnsym=None, occidx=None):
+        x0 = TDA.init_guess(self, mf, nstates, wfnsym, occidx)
         y0 = numpy.zeros_like(x0)
         return numpy.asarray(numpy.block([[x0, y0], [y0, x0.conj()]]))
 
-    def kernel(self, x0=None, nstates=None):
+    def kernel(self, x0=None, nstates=None, occidx=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
         '''
         cpu0 = (logger.process_clock(), logger.perf_counter())
@@ -985,12 +1028,20 @@ class TDHF(TDA):
         else:
             self.nstates = nstates
 
+        if occidx is None:
+            occidx = self.occidx
+        else:
+            self.occidx = occidx
+
+        # if isinstance(occidx, list):
+        #     occidx = [idx - 1 for idx in occidx]
+
         log = logger.Logger(self.stdout, self.verbose)
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(self._scf, occidx)
         precond = self.get_precond(hdiag)
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess(self._scf, self.nstates, occidx=occidx)
 
         # We only need positive eigenvalues
         def pickeig(w, v, nroots, envs):
@@ -1014,6 +1065,8 @@ class TDHF(TDA):
         nmo = self._scf.mo_occ.size
         nvir = nmo - nocc
         self.e = w
+        if occidx is not None:
+            nocc = len(occidx)
         def norm_xy(z):
             x, y = z.reshape(2,nocc,nvir)
             norm = lib.norm(x)**2 - lib.norm(y)**2

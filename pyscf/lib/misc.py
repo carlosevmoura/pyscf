@@ -602,6 +602,7 @@ def check_sanity(obj, keysref, stdout=sys.stdout):
                 sys.stderr.write(msg)
                 if stdout is not sys.stdout:
                     stdout.write(msg)
+                    stdout.write(msg)
     return obj
 
 def with_doc(doc):

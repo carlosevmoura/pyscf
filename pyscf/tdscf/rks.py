@@ -48,7 +48,7 @@ class CasidaTDDFT(TDDFT, TDA):
     '''
     init_guess = TDA.init_guess
 
-    def gen_vind(self, mf=None):
+    def gen_vind(self, mf=None, occidx=None):
         if mf is None:
             mf = self._scf
         wfnsym = self.wfnsym
@@ -60,7 +60,7 @@ class CasidaTDDFT(TDDFT, TDA):
         mo_energy = mf.mo_energy
         mo_occ = mf.mo_occ
         nao, nmo = mo_coeff.shape
-        occidx = numpy.where(mo_occ==2)[0]
+        if occidx is None: occidx = numpy.where(mo_occ==2)[0]
         viridx = numpy.where(mo_occ==0)[0]
         nocc = len(occidx)
         nvir = len(viridx)
@@ -101,7 +101,7 @@ class CasidaTDDFT(TDDFT, TDA):
 
         return vind, hdiag
 
-    def kernel(self, x0=None, nstates=None):
+    def kernel(self, x0=None, nstates=None, occidx=None):
         '''TDDFT diagonalization solver
         '''
         cpu0 = (lib.logger.process_clock(), lib.logger.perf_counter())
@@ -116,17 +116,23 @@ class CasidaTDDFT(TDDFT, TDA):
         else:
             self.nstates = nstates
 
+        if isinstance(occidx, list):
+            self.occidx = occidx - 1
+        else:
+            self.occidx = None
+
         log = lib.logger.Logger(self.stdout, self.verbose)
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(self._scf, self.occidx)
         precond = self.get_precond(hdiag)
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates)
+            x0 = self.init_guess(self._scf, self.nstates, occidx=self.occidx)
 
         def pickeig(w, v, nroots, envs):
             idx = numpy.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
+        print(">>> occidx: {:}".format(occidx))
         self.converged, w2, x1 = \
                 lib.davidson1(vind, x0, precond,
                               tol=self.conv_tol,
@@ -137,7 +143,7 @@ class CasidaTDDFT(TDDFT, TDA):
 
         mo_energy = self._scf.mo_energy
         mo_occ = self._scf.mo_occ
-        occidx = numpy.where(mo_occ==2)[0]
+        if occidx is None: occidx = numpy.where(mo_occ==2)[0]
         viridx = numpy.where(mo_occ==0)[0]
         e_ia = (mo_energy[viridx,None] - mo_energy[occidx]).T
         e_ia = numpy.sqrt(e_ia)
