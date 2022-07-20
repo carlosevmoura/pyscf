@@ -867,7 +867,7 @@ class TDA(TDMixin):
 
         log = logger.Logger(self.stdout, self.verbose)
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(self._scf, self.occidx)
         precond = self.get_precond(hdiag)
 
         if x0 is None:
