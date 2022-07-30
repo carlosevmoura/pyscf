@@ -860,18 +860,18 @@ class TDA(TDMixin):
         else:
             self.nstates = nstates
 
-        if isinstance(occidx, list):
-            self.occidx = occidx - 1
+        if occidx is None:
+            occidx = self.occidx
         else:
-            self.occidx = None
+            self.occidx = occidx
 
         log = logger.Logger(self.stdout, self.verbose)
 
-        vind, hdiag = self.gen_vind(self._scf, self.occidx)
+        vind, hdiag = self.gen_vind(self._scf, occidx)
         precond = self.get_precond(hdiag)
 
         if x0 is None:
-            x0 = self.init_guess(self._scf, self.nstates, self.occidx)
+            x0 = self.init_guess(self._scf, self.nstates, occidx=occidx)
 
         def pickeig(w, v, nroots, envs):
             idx = numpy.where(w > self.positive_eig_threshold)[0]
@@ -885,12 +885,11 @@ class TDA(TDMixin):
                               max_space=self.max_space, pick=pickeig,
                               verbose=log)
 
-        if self.occidx is None:
-            nocc = (self._scf.mo_occ>0).sum()
-        else:
-            nocc = len(self.occidx)
         nmo = self._scf.mo_occ.size
+        nocc = (self._scf.mo_occ>0).sum()
         nvir = nmo - nocc
+        if occidx is not None:
+            nocc = len(occidx)
 # 1/sqrt(2) because self.x is for alpha excitation amplitude and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir)*numpy.sqrt(.5),0) for xi in x1]
 

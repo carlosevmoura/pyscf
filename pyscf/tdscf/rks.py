@@ -132,7 +132,6 @@ class CasidaTDDFT(TDDFT, TDA):
             idx = numpy.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
-        print(">>> occidx: {:}".format(occidx))
         self.converged, w2, x1 = \
                 lib.davidson1(vind, x0, precond,
                               tol=self.conv_tol,
