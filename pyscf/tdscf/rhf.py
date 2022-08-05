@@ -379,10 +379,7 @@ def analyze(tdobj, verbose=None):
 
     occidx = tdobj.occidx
     viridx = tdobj.viridx
-    if occidx is None:
-        nocc = numpy.count_nonzero(mo_occ == 2)
-    else:
-        nocc = len(occidx)
+    nocc = numpy.count_nonzero(mo_occ == 2)
 
     e_ev = numpy.asarray(tdobj.e) * nist.HARTREE2EV
     e_wn = numpy.asarray(tdobj.e) * nist.HARTREE2WAVENUMBER
